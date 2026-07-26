@@ -4,6 +4,11 @@ This is a fork of [nginx/nginx](https://github.com/nginx/nginx). It carries one
 change: **nginx can serve HTTP status codes that are not exactly three digits
 long** — two-digit codes such as `42` and four-digit codes such as `4200`.
 
+> [!NOTE]
+> **This fork was made for fun.** It is a deliberate protocol violation with no
+> production use case. It is not intended to be merged upstream, and you almost
+> certainly should not run it anywhere that matters.
+
 ## The problem
 
 Upstream nginx hardcodes the assumption that a status code is exactly three
@@ -37,6 +42,24 @@ Example:
 location /two    { return 42; }
 location /four   { return 4200; }
 location /body   { return 42 "hello\n"; }
+```
+
+## Trying it
+
+A prebuilt Alpine image is published as
+[`mabalashov/nginx-weird`](https://hub.docker.com/r/mabalashov/nginx-weird)
+(`linux/amd64` and `linux/arm64`). It answers `Ok` on port 67:
+
+```bash
+docker compose up --build
+curl localhost:8067
+```
+
+`docker-compose.yml` builds from this tree, so it picks up local changes. To see
+a non-three-digit code you need a raw socket, since `curl` will not parse one:
+
+```bash
+printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc localhost 8067
 ```
 
 ## Caveats
