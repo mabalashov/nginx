@@ -923,7 +923,8 @@ ngx_http_log_status(ngx_http_request_t *r, u_char *buf, u_char *end,
         status = 0;
     }
 
-    return ngx_sprintf(buf, "%03ui", status);
+    /* ponytail: keep the "000"/"009" sentinels 3-wide, print real codes as-is */
+    return ngx_sprintf(buf, status < 10 ? "%03ui" : "%ui", status);
 }
 
 

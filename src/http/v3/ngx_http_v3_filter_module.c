@@ -85,7 +85,7 @@ static ngx_int_t
 ngx_http_v3_header_filter(ngx_http_request_t *r)
 {
     u_char                    *p;
-    size_t                     len, n;
+    size_t                     len, n, status_len;
     ngx_buf_t                 *b;
     ngx_str_t                  host, location;
     ngx_uint_t                 i, port;
@@ -98,6 +98,7 @@ ngx_http_v3_header_filter(ngx_http_request_t *r)
     ngx_http_core_loc_conf_t  *clcf;
     ngx_http_core_srv_conf_t  *cscf;
     u_char                     addr[NGX_SOCKADDR_STRLEN];
+    u_char                     status_buf[NGX_INT_T_LEN];
 
     if (r->http_version != NGX_HTTP_VERSION_30) {
         return ngx_http_next_header_filter(r);
@@ -149,6 +150,11 @@ ngx_http_v3_header_filter(ngx_http_request_t *r)
 
     len = ngx_http_v3_encode_field_section_prefix(NULL, 0, 0, 0);
 
+    /* ponytail: status may be 2..4 digits, so measure it instead of
+     * assuming 3 */
+    status_len = ngx_sprintf(status_buf, "%ui", r->headers_out.status)
+                 - status_buf;
+
     if (r->headers_out.status == NGX_HTTP_OK) {
         len += ngx_http_v3_encode_field_ri(NULL, 0,
                                            NGX_HTTP_V3_HEADER_STATUS_200);
@@ -156,7 +162,7 @@ ngx_http_v3_header_filter(ngx_http_request_t *r)
     } else {
         len += ngx_http_v3_encode_field_lri(NULL, 0,
                                             NGX_HTTP_V3_HEADER_STATUS_200,
-                                            NULL, 3);
+                                            NULL, status_len);
     }
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
@@ -338,8 +344,8 @@ ngx_http_v3_header_filter(ngx_http_request_t *r)
     } else {
         b->last = (u_char *) ngx_http_v3_encode_field_lri(b->last, 0,
                                                  NGX_HTTP_V3_HEADER_STATUS_200,
-                                                 NULL, 3);
-        b->last = ngx_sprintf(b->last, "%03ui", r->headers_out.status);
+                                                 NULL, status_len);
+        b->last = ngx_cpymem(b->last, status_buf, status_len);
     }
 
     if (r->headers_out.server == NULL) {

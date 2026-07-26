@@ -107,7 +107,7 @@ static ngx_int_t
 ngx_http_v2_header_filter(ngx_http_request_t *r)
 {
     u_char                     status, *pos, *start, *p, *tmp;
-    size_t                     len, tmp_len;
+    size_t                     len, tmp_len, status_len;
     ngx_str_t                  host, location;
     ngx_uint_t                 i, port, fin;
     ngx_list_part_t           *part;
@@ -119,6 +119,7 @@ ngx_http_v2_header_filter(ngx_http_request_t *r)
     ngx_http_core_loc_conf_t  *clcf;
     ngx_http_core_srv_conf_t  *cscf;
     u_char                     addr[NGX_SOCKADDR_STRLEN];
+    u_char                     status_buf[NGX_INT_T_LEN];
 
     static const u_char nginx[5] = { 0x84, 0xaa, 0x63, 0x55, 0xe7 };
 #if (NGX_HTTP_GZIP)
@@ -219,7 +220,11 @@ ngx_http_v2_header_filter(ngx_http_request_t *r)
 
     len = h2c->table_update ? 1 : 0;
 
-    len += status ? 1 : 1 + ngx_http_v2_literal_size("418");
+    /* ponytail: status may be 2..4 digits, so measure it, don't assume 3 */
+    status_len = ngx_sprintf(status_buf, "%ui", r->headers_out.status)
+                 - status_buf;
+
+    len += status ? 1 : 1 + ngx_http_v2_integer_octets(status_len) + status_len;
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
@@ -430,7 +435,7 @@ ngx_http_v2_header_filter(ngx_http_request_t *r)
     }
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, fc->log, 0,
-                   "http2 output header: \":status: %03ui\"",
+                   "http2 output header: \":status: %ui\"",
                    r->headers_out.status);
 
     if (status) {
@@ -438,8 +443,8 @@ ngx_http_v2_header_filter(ngx_http_request_t *r)
 
     } else {
         *pos++ = ngx_http_v2_inc_indexed(NGX_HTTP_V2_STATUS_INDEX);
-        *pos++ = NGX_HTTP_V2_ENCODE_RAW | 3;
-        pos = ngx_sprintf(pos, "%03ui", r->headers_out.status);
+        *pos++ = NGX_HTTP_V2_ENCODE_RAW | (u_char) status_len;
+        pos = ngx_cpymem(pos, status_buf, status_len);
     }
 
     if (r->headers_out.server == NULL) {

@@ -1,3 +1,61 @@
+# About this fork
+
+This is a fork of [nginx/nginx](https://github.com/nginx/nginx). It carries one
+change: **nginx can serve HTTP status codes that are not exactly three digits
+long** — two-digit codes such as `42` and four-digit codes such as `4200`.
+
+## The problem
+
+Upstream nginx hardcodes the assumption that a status code is exactly three
+digits, in several independent places:
+
+- `return 42;` works, but the HTTP/1.x header filter formats the status line
+  with `%03ui`, so the code goes out on the wire zero-padded as `042`.
+- `return 4200;` is rejected at config-parse time — both `return` and
+  `try_files` refuse any code above `999`.
+- The HTTP/2 and HTTP/3 header filters encode the `:status` pseudo-header with
+  a literal length of `3`, both when sizing the output buffer and when writing
+  it. A code of any other width would be mis-framed.
+
+So there is no way to make upstream nginx emit a status code outside `100`–`999`,
+even though nothing in nginx's request pipeline actually depends on the width.
+
+## What this fork changes
+
+The width assumption is removed: the status code is measured, then that measured
+length is used for both buffer sizing and encoding. Verified on HTTP/1.1 and
+HTTP/2; the HTTP/3 path is the same change but has only been build-tested.
+
+The `$status` variable and the access-log `$status` field keep nginx's existing
+`000` and `009` sentinels three digits wide (no response, and HTTP/0.9,
+respectively), so existing log parsers are unaffected. Real codes print at their
+natural width.
+
+Example:
+
+```nginx
+location /two    { return 42; }
+location /four   { return 4200; }
+location /body   { return 42 "hello\n"; }
+```
+
+## Caveats
+
+- **Most HTTP clients will reject these responses.** RFC 9110 requires the
+  status code to be exactly three digits. `curl`, browsers, proxies, and most
+  HTTP libraries will treat a two- or four-digit code as a protocol error. You
+  will need a raw socket or a purpose-built client to consume them.
+- Only the *sending* side is changed. `ngx_http_parse_status_line()` still
+  requires three digits, so `proxy_pass` to an upstream that answers `42` will
+  still fail.
+- This is a deliberate protocol violation. It exists for testing, research, and
+  closed systems where both ends are under your control — not for the public
+  internet.
+
+Everything below is upstream nginx's README, unchanged.
+
+---
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/9335b488-ffcc-4157-8364-2370a0b70ad0">
   <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/3a7eeb08-1133-47f5-859c-fad4f5a6a013">

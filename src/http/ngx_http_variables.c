@@ -1912,7 +1912,9 @@ ngx_http_variable_status(ngx_http_request_t *r,
         status = 0;
     }
 
-    v->len = ngx_sprintf(v->data, "%03ui", status) - v->data;
+    /* ponytail: keep the "000"/"009" sentinels 3-wide, print real codes as-is */
+    v->len = ngx_sprintf(v->data, status < 10 ? "%03ui" : "%ui", status)
+             - v->data;
     v->valid = 1;
     v->no_cacheable = 0;
     v->not_found = 0;
