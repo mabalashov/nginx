@@ -66,10 +66,10 @@ location /teapot { return 4180 "I am a very large teapot\n"; }
 
 ## Trying it
 
-![A browser's DevTools showing a non-three-digit status code served by nginx/1.31.4](docs/preview.png)
+![Chrome DevTools showing a response with status code 6767](docs/preview.png)
 
 That is Chrome's network panel, not a mockup — the response really did arrive
-with a status code that is not three digits long.
+with status code `6767`.
 
 ### Getting the image from Docker Hub
 
