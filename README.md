@@ -1,8 +1,25 @@
 # About this fork
 
 This is a fork of [nginx/nginx](https://github.com/nginx/nginx). It carries one
-change: **nginx can serve HTTP status codes that are not exactly three digits
-long** — two-digit codes such as `42` and four-digit codes such as `4200`.
+change: **nginx can serve four-digit HTTP status codes** — `6767`, `4200`,
+anything up to `9999`.
+
+Give stock nginx such a config and it does not start at all:
+
+```
+$ nginx -t
+nginx: [emerg] invalid return code "6767" in /etc/nginx/nginx.conf:13
+```
+
+This fork serves it:
+
+```
+HTTP/1.1 6767
+Server: nginx/1.31.4
+Content-Length: 3
+
+Ok
+```
 
 > [!NOTE]
 > **This fork was made for fun.** It is a deliberate protocol violation with no
@@ -12,44 +29,47 @@ long** — two-digit codes such as `42` and four-digit codes such as `4200`.
 ## The problem
 
 Upstream nginx hardcodes the assumption that a status code is exactly three
-digits, in several independent places:
+digits, and it does so in several independent places, so a four-digit code fails
+at every layer:
 
-- `return 42;` works, but the HTTP/1.x header filter formats the status line
-  with `%03ui`, so the code goes out on the wire zero-padded as `042`.
-- `return 4200;` is rejected at config-parse time — both `return` and
-  `try_files` refuse any code above `999`.
-- The HTTP/2 and HTTP/3 header filters encode the `:status` pseudo-header with
-  a literal length of `3`, both when sizing the output buffer and when writing
-  it. A code of any other width would be mis-framed.
+- **Config parsing rejects it outright.** Both `return` and `try_files` refuse
+  any code above `999`, with `[emerg] invalid return code`. nginx exits
+  non-zero and never starts — this is a hard failure, not a warning.
+- **The HTTP/1.x status line is formatted with `%03ui`.** That happens to leave
+  a four-digit code intact, but the padding exists precisely because the width
+  was assumed fixed.
+- **HTTP/2 and HTTP/3 encode `:status` with a literal length of `3`**, both when
+  sizing the output buffer and when writing into it. A four-digit code would be
+  mis-framed on the wire.
 
-So there is no way to make upstream nginx emit a status code outside `100`–`999`,
-even though nothing in nginx's request pipeline actually depends on the width.
+So there is no way to make upstream nginx emit a status code above `999`, even
+though nothing in nginx's request pipeline actually depends on the width.
 
 ## What this fork changes
 
-The width assumption is removed: the status code is measured, then that measured
-length is used for both buffer sizing and encoding. Verified on HTTP/1.1 and
+The width assumption is removed: the status code is measured once, and that
+measured length is used for both buffer sizing and encoding. The `return` and
+`try_files` ceilings move from `999` to `9999`. Verified on HTTP/1.1 and
 HTTP/2; the HTTP/3 path is the same change but has only been build-tested.
 
-The `$status` variable and the access-log `$status` field keep nginx's existing
-`000` and `009` sentinels three digits wide (no response, and HTTP/0.9,
-respectively), so existing log parsers are unaffected. Real codes print at their
-natural width.
+The `$status` variable and the access-log `$status` field are unaffected for
+every value that existed before, including nginx's `000` and `009` sentinels
+(no response, and HTTP/0.9). Four-digit codes simply log as four digits.
 
 Example:
 
 ```nginx
-location /two    { return 42; }
-location /four   { return 4200; }
-location /body   { return 42 "hello\n"; }
+location /       { return 6767 "Ok\n"; }
+location /bare   { return 4200; }
+location /teapot { return 4180 "I am a very large teapot\n"; }
 ```
 
 ## Trying it
 
-![A browser's DevTools showing a response with status code 67 from nginx/1.31.4](docs/preview.png)
+![A browser's DevTools showing a non-three-digit status code served by nginx/1.31.4](docs/preview.png)
 
 That is Chrome's network panel, not a mockup — the response really did arrive
-with a two-digit status code.
+with a status code that is not three digits long.
 
 ### Getting the image from Docker Hub
 
@@ -71,7 +91,7 @@ Force the other with `--platform linux/amd64` if you want to see it run under
 emulation. The image is about 16 MB: a bare Alpine plus the nginx binary and
 its pcre2, zlib and openssl libraries.
 
-It serves `Ok` on port 67 with status `67` out of the box:
+It serves `Ok` on port 67 with status `6767` out of the box:
 
 ```bash
 docker run --rm -p 8067:67 mabalashov/nginx-weird
@@ -89,7 +109,7 @@ printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc localhost 8
 ```
 
 ```http
-HTTP/1.1 67
+HTTP/1.1 6767
 Server: nginx/1.31.4
 Content-Type: text/plain
 Content-Length: 3
@@ -97,27 +117,37 @@ Content-Length: 3
 Ok
 ```
 
-### Comparing against upstream nginx
+### Comparing against upstream nginx: it does not start
 
 `docker-compose.original.yml` runs the *official* nginx image on the very same
-config, on port 8068, under its own project name — so both can run at once:
+`docker/nginx.conf`, on port 8068, under its own project name — so both can run
+at once:
 
 ```bash
-docker compose up -d
-docker compose -f docker-compose.original.yml up -d
+docker compose up -d                                     # this fork
+docker compose -f docker-compose.original.yml up -d      # stock nginx
 ```
 
-Upstream accepts `return 67;` without complaint and answers, but zero-pads the
-status line, which is exactly the behaviour this fork removes:
+The fork answers. Stock nginx never gets as far as answering — it rejects
+`return 6767;` while reading the config and the container dies immediately:
 
-```
-fork      → HTTP/1.1 67     Server: nginx/1.31.4
-upstream  → HTTP/1.1 067    Server: nginx/1.30.4
+```console
+$ docker compose ps
+NAME             STATUS
+nginx-nginx-1    Up 12 seconds
+
+$ docker compose -f docker-compose.original.yml ps -a
+NAME                      STATUS
+nginx-original-nginx-1    Exited (1)
+
+$ docker compose -f docker-compose.original.yml logs
+2026/07/26 13:35:21 [emerg] 1#1: invalid return code "6767" in /etc/nginx/nginx.conf:13
+nginx: [emerg] invalid return code "6767" in /etc/nginx/nginx.conf:13
 ```
 
-That `067` is the trap worth knowing about: if `image:` in
-`docker-compose.yml` ever points at stock nginx, nothing errors out — the code
-is silently three digits again.
+This is the clearest way to see what the fork buys: there is no gradual
+degradation and no zero-padded fallback for a four-digit code. Stock nginx
+refuses the config outright, exits `1`, and serves nothing at all.
 
 A raw socket is the reliable way to look at the response; see
 [Caveats](#caveats) for why. To build the image from this tree instead of
@@ -136,7 +166,7 @@ docker build -t nginx-weird . && docker run --rm -p 8067:67 nginx-weird
   above shows. Assume nothing, and use a raw socket (`nc`, `socat`, a few lines
   of `socket`) when you need to know what actually came back.
 - Only the *sending* side is changed. `ngx_http_parse_status_line()` still
-  requires three digits, so `proxy_pass` to an upstream that answers `42` will
+  requires three digits, so `proxy_pass` to an upstream that answers `6767` will
   still fail.
 - This is a deliberate protocol violation. It exists for testing, research, and
   closed systems where both ends are under your control — not for the public

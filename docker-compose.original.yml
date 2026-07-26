@@ -1,8 +1,10 @@
-# The same config on upstream nginx, for comparison. It starts and answers, but
-# zero-pads the status line to "067" instead of "67".
+# The same config on upstream nginx, for comparison.  It does not start: stock
+# nginx rejects the four-digit "return 6767" while reading the config and exits
+# 1, so the container dies before it ever listens.  That failure is the point.
 #
 #   docker compose -f docker-compose.original.yml up -d
-#   printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc localhost 8068
+#   docker compose -f docker-compose.original.yml logs
+#   -> [emerg] invalid return code "6767" in /etc/nginx/nginx.conf:13
 #
 # A separate project name and host port, so it can run alongside the fork.
 name: nginx-original
