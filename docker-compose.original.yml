@@ -1,0 +1,19 @@
+# The same config on upstream nginx, for comparison. It starts and answers, but
+# zero-pads the status line to "067" instead of "67".
+#
+#   docker compose -f docker-compose.original.yml up -d
+#   printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc localhost 8068
+#
+# A separate project name and host port, so it can run alongside the fork.
+name: nginx-original
+
+services:
+  nginx:
+    image: nginx:stable
+    # The official image's default command already passes "daemon off;", which
+    # would collide with the same directive in our config.
+    command: ["nginx"]
+    ports:
+      - "8068:67"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro

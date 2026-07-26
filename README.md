@@ -46,18 +46,47 @@ location /body   { return 42 "hello\n"; }
 
 ## Trying it
 
+![A browser's DevTools showing a response with status code 67 from nginx/1.31.4](docs/preview.png)
+
+That is Chrome's network panel, not a mockup — the response really did arrive
+with a two-digit status code.
+
+### Getting the image from Docker Hub
+
 A prebuilt Alpine image is published as
-[`mabalashov/nginx-weird`](https://hub.docker.com/r/mabalashov/nginx-weird)
-(`linux/amd64` and `linux/arm64`). `docker-compose.yml` pulls it and mounts
-[`docker/nginx.conf`](docker/nginx.conf) over the image's own config, so you can
-edit the server config without rebuilding anything:
+[`mabalashov/nginx-weird`](https://hub.docker.com/r/mabalashov/nginx-weird):
+
+```bash
+docker pull mabalashov/nginx-weird
+```
+
+| Tag      | Contents                             |
+| -------- | ------------------------------------ |
+| `1.31.4` | Immutable, pinned to an nginx version |
+| `latest` | Currently the same image as `1.31.4`  |
+
+The tags are a multi-platform manifest list covering `linux/amd64` and
+`linux/arm64`, so Docker picks the right one for your machine automatically.
+Force the other with `--platform linux/amd64` if you want to see it run under
+emulation. The image is about 16 MB: a bare Alpine plus the nginx binary and
+its pcre2, zlib and openssl libraries.
+
+It serves `Ok` on port 67 with status `67` out of the box:
+
+```bash
+docker run --rm -p 8067:67 mabalashov/nginx-weird
+```
+
+### Using docker compose
+
+`docker-compose.yml` pulls the same image and mounts
+[`docker/nginx.conf`](docker/nginx.conf) over the config baked into it, so you
+can change what the server does without rebuilding or re-pulling anything:
 
 ```bash
 docker compose up -d
 printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc localhost 8067
 ```
-
-Which answers with a two-digit status code:
 
 ```http
 HTTP/1.1 67
@@ -68,11 +97,31 @@ Content-Length: 3
 Ok
 ```
 
-A raw socket is necessary here — `curl` exits non-zero without printing
-anything, because a two-digit code is not a status line it will parse.
+### Comparing against upstream nginx
 
-To rebuild the image from this tree instead of pulling it, use the
-[`Dockerfile`](Dockerfile) directly:
+`docker-compose.original.yml` runs the *official* nginx image on the very same
+config, on port 8068, under its own project name — so both can run at once:
+
+```bash
+docker compose up -d
+docker compose -f docker-compose.original.yml up -d
+```
+
+Upstream accepts `return 67;` without complaint and answers, but zero-pads the
+status line, which is exactly the behaviour this fork removes:
+
+```
+fork      → HTTP/1.1 67     Server: nginx/1.31.4
+upstream  → HTTP/1.1 067    Server: nginx/1.30.4
+```
+
+That `067` is the trap worth knowing about: if `image:` in
+`docker-compose.yml` ever points at stock nginx, nothing errors out — the code
+is silently three digits again.
+
+A raw socket is the reliable way to look at the response; see
+[Caveats](#caveats) for why. To build the image from this tree instead of
+pulling it, use the [`Dockerfile`](Dockerfile) directly:
 
 ```bash
 docker build -t nginx-weird . && docker run --rm -p 8067:67 nginx-weird
@@ -80,10 +129,12 @@ docker build -t nginx-weird . && docker run --rm -p 8067:67 nginx-weird
 
 ## Caveats
 
-- **Most HTTP clients will reject these responses.** RFC 9110 requires the
-  status code to be exactly three digits. `curl`, browsers, proxies, and most
-  HTTP libraries will treat a two- or four-digit code as a protocol error. You
-  will need a raw socket or a purpose-built client to consume them.
+- **Client support is a lottery.** RFC 9110 requires the status code to be
+  exactly three digits, so anything that enforces it is entitled to reject the
+  response. `curl` does: it exits non-zero and prints nothing. Chrome, on the
+  other hand, parses and displays it happily — that is what the screenshot
+  above shows. Assume nothing, and use a raw socket (`nc`, `socat`, a few lines
+  of `socket`) when you need to know what actually came back.
 - Only the *sending* side is changed. `ngx_http_parse_status_line()` still
   requires three digits, so `proxy_pass` to an upstream that answers `42` will
   still fail.
