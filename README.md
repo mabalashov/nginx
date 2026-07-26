@@ -48,18 +48,34 @@ location /body   { return 42 "hello\n"; }
 
 A prebuilt Alpine image is published as
 [`mabalashov/nginx-weird`](https://hub.docker.com/r/mabalashov/nginx-weird)
-(`linux/amd64` and `linux/arm64`). It answers `Ok` on port 67:
+(`linux/amd64` and `linux/arm64`). `docker-compose.yml` pulls it and mounts
+[`docker/nginx.conf`](docker/nginx.conf) over the image's own config, so you can
+edit the server config without rebuilding anything:
 
 ```bash
-docker compose up --build
-curl localhost:8067
+docker compose up -d
+printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc localhost 8067
 ```
 
-`docker-compose.yml` builds from this tree, so it picks up local changes. To see
-a non-three-digit code you need a raw socket, since `curl` will not parse one:
+Which answers with a two-digit status code:
+
+```http
+HTTP/1.1 67
+Server: nginx/1.31.4
+Content-Type: text/plain
+Content-Length: 3
+
+Ok
+```
+
+A raw socket is necessary here — `curl` exits non-zero without printing
+anything, because a two-digit code is not a status line it will parse.
+
+To rebuild the image from this tree instead of pulling it, use the
+[`Dockerfile`](Dockerfile) directly:
 
 ```bash
-printf 'GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' | nc localhost 8067
+docker build -t nginx-weird . && docker run --rm -p 8067:67 nginx-weird
 ```
 
 ## Caveats

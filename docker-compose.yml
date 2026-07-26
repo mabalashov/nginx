@@ -1,6 +1,7 @@
 services:
   nginx:
-    build: .
     image: mabalashov/nginx-weird:1.31.4
     ports:
       - "8067:67"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro

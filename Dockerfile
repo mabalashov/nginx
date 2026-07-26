@@ -26,19 +26,9 @@ RUN mkdir -p /var/lib/nginx/logs
 
 COPY --from=build /src/objs/nginx /usr/sbin/nginx
 
-# ponytail: config inline, it is four directives; split it out if it grows
-COPY <<'EOF' /etc/nginx/nginx.conf
-daemon off;
-error_log /dev/stderr info;
-events { }
-http {
-    access_log /dev/stdout;
-    server {
-        listen 67;
-        location / { return 200 "Ok\n"; }
-    }
-}
-EOF
+# Baked in as the default; docker-compose.yml mounts the same file over it, so
+# there is one config to edit either way.
+COPY docker/nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 67
 CMD ["nginx"]
